@@ -1,10 +1,6 @@
-# app.py
-# API Flask pour le calculateur BAZI
-# Wrapper autour du code existant de china-testing/bazi
-
 import os
 import sys
-import io
+import re
 import subprocess
 from flask import Flask, request, jsonify
 from flask_cors import CORS
@@ -12,224 +8,225 @@ from flask_cors import CORS
 app = Flask(__name__)
 CORS(app)
 
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-def run_bazi(annee, mois, jour, heure, genre="homme", calendrier="gregorien"):
-    """
-    Exécute bazi.py en sous-processus et capture la sortie texte.
-    C'est la méthode la plus sûre car le code original
-    est conçu pour le terminal.
-    """
-    try:
-        # Construire la commande
-        cmd = [sys.executable, "bazi.py", 
-               str(annee), str(mois), str(jour), str(heure)]
-        
-        # Ajouter -g pour calendrier grégorien (公历)
-        if calendrier == "gregorien":
-            cmd.append("-g")
-        
-        # Ajouter -n pour femme (女)
-        if genre == "femme":
-            cmd.append("-n")
-        
-        # Exécuter le script et capturer la sortie
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=30,
-            env={**os.environ, "PYTHONIOENCODING": "utf-8"}
-        )
-        
-        sortie = result.stdout
-        erreur = result.stderr
-        
-        if result.returncode != 0:
-            return {
-                "success": False,
-                "erreur": f"Erreur du calcul BAZI: {erreur}",
-                "code_retour": result.returncode
+# ============================================================
+# MAPPINGS
+# ============================================================
+TRONC_INFO = {
+    '甲': {'pinyin':'Jiǎ','element':'Bois','pol':'+'},
+    '乙': {'pinyin':'Yǐ','element':'Bois','pol':'-'},
+    '丙': {'pinyin':'Bǐng','element':'Feu','pol':'+'},
+    '丁': {'pinyin':'Dīng','element':'Feu','pol':'-'},
+    '戊': {'pinyin':'Wù','element':'Terre','pol':'+'},
+    '己': {'pinyin':'Jǐ','element':'Terre','pol':'-'},
+    '庚': {'pinyin':'Gēng','element':'Métal','pol':'+'},
+    '辛': {'pinyin':'Xīn','element':'Métal','pol':'-'},
+    '壬': {'pinyin':'Rén','element':'Eau','pol':'+'},
+    '癸': {'pinyin':'Guǐ','element':'Eau','pol':'-'},
+}
+
+BRANCHE_INFO = {
+    '子': {'pinyin':'Zǐ','element':'Eau','animal':'Rat 🐀'},
+    '丑': {'pinyin':'Chǒu','element':'Terre','animal':'Buffle 🐂'},
+    '寅': {'pinyin':'Yín','element':'Bois','animal':'Tigre 🐅'},
+    '卯': {'pinyin':'Mǎo','element':'Bois','animal':'Lapin 🐇'},
+    '辰': {'pinyin':'Chén','element':'Terre','animal':'Dragon 🐉'},
+    '巳': {'pinyin':'Sì','element':'Feu','animal':'Serpent 🐍'},
+    '午': {'pinyin':'Wǔ','element':'Feu','animal':'Cheval 🐴'},
+    '未': {'pinyin':'Wèi','element':'Terre','animal':'Chèvre 🐐'},
+    '申': {'pinyin':'Shēn','element':'Métal','animal':'Singe 🐒'},
+    '酉': {'pinyin':'Yǒu','element':'Métal','animal':'Coq 🐓'},
+    '戌': {'pinyin':'Xū','element':'Terre','animal':'Chien 🐕'},
+    '亥': {'pinyin':'Hài','element':'Eau','animal':'Cochon 🐖'},
+}
+
+SHISHEN_FR = {
+    '比':'Parallèle','劫':'Rob. Richesse','食':'Dieu Gourmand',
+    '伤':'Off. Blessant','才':'Ric. Partielle','财':'Ric. Directe',
+    '杀':'7e Tueur','官':'Off. Direct','枭':'Sceau Partiel','印':'Sceau Direct',
+    '--':'Maître du Jour'
+}
+
+# ============================================================
+# PARSING
+# ============================================================
+def parse_bazi_output(raw):
+    c = re.sub(r'\x1b\[[0-9;]*m', '', raw)
+    result = {}
+
+    # --- QUATRE PILIERS ---
+    m = re.search(r'四柱：(\S{2})\s+(\S{2})\s+(\S{2})\s+(\S{2})', c)
+    if m:
+        pillars = [m.group(1), m.group(2), m.group(3), m.group(4)]
+        result['quatre_piliers'] = ' '.join(pillars)
+        names = ['annee','mois','jour','heure']
+        result['piliers'] = {}
+        for i, name in enumerate(names):
+            t, b = pillars[i][0], pillars[i][1]
+            ti = TRONC_INFO.get(t, {})
+            bi = BRANCHE_INFO.get(b, {})
+            result['piliers'][name] = {
+                'tronc': t, 'branche': b,
+                'binome': pillars[i],
+                'tronc_pinyin': ti.get('pinyin',''),
+                'branche_pinyin': bi.get('pinyin',''),
+                'tronc_element': ti.get('element',''),
+                'branche_element': bi.get('element',''),
+                'animal': bi.get('animal',''),
             }
-        
-        # Parser la sortie pour extraire les infos clés
-        resultat = parser_sortie_bazi(sortie)
-        resultat["success"] = True
-        resultat["sortie_brute"] = sortie
-        
-        return resultat
-        
-    except subprocess.TimeoutExpired:
-        return {"success": False, "erreur": "Timeout - calcul trop long"}
-    except Exception as e:
-        return {"success": False, "erreur": str(e)}
 
+    # --- DIX DIEUX (SHISHEN) ---
+    m = re.search(
+        r'([甲乙丙丁戊己庚辛壬癸])\s+([甲乙丙丁戊己庚辛壬癸])\s+([甲乙丙丁戊己庚辛壬癸])\s+([甲乙丙丁戊己庚辛壬癸])\s+'
+        r'(比|劫|食|伤|才|财|杀|官|枭|印|--)\s+(比|劫|食|伤|才|财|杀|官|枭|印|--)\s+(比|劫|食|伤|才|财|杀|官|枭|印|--)\s+(比|劫|食|伤|才|财|杀|官|枭|印|--)',
+        c)
+    if m and 'piliers' in result:
+        gods = [m.group(5), m.group(6), m.group(7), m.group(8)]
+        for i, name in enumerate(['annee','mois','jour','heure']):
+            result['piliers'][name]['shishen'] = gods[i]
+            result['piliers'][name]['shishen_fr'] = SHISHEN_FR.get(gods[i], gods[i])
 
-def parser_sortie_bazi(texte):
-    """
-    Parse la sortie texte de bazi.py pour extraire
-    les informations structurées.
-    """
-    resultat = {
-        "date_solaire": "",
-        "date_lunaire": "",
-        "quatre_piliers": "",
-        "details_complet": "",
-        "piliers": {
-            "annee": {"tronc": "", "branche": ""},
-            "mois":  {"tronc": "", "branche": ""},
-            "jour":  {"tronc": "", "branche": ""},
-            "heure": {"tronc": "", "branche": ""}
+    # --- CINQ ELEMENTS ---
+    m = re.search(r'金(\d+)\s+木(\d+)\s+水(\d+)\s+火(\d+)\s+土(\d+)', c)
+    if m:
+        result['wuxing'] = {
+            'metal': int(m.group(1)), 'bois': int(m.group(2)),
+            'eau': int(m.group(3)), 'feu': int(m.group(4)),
+            'terre': int(m.group(5))
         }
-    }
-    
-    lignes = texte.strip().split("\n")
-    
-    for ligne in lignes:
-        ligne_clean = ligne.strip()
-        
-        # Chercher la date grégorienne (公历)
-        if "公历" in ligne_clean:
-            resultat["date_solaire"] = ligne_clean
-        
-        # Chercher la date lunaire (农历)
-        if "农历" in ligne_clean:
-            resultat["date_lunaire"] = ligne_clean
-        
-        # Chercher lunar_python qui contient les 4 piliers
-        if "lunar_python" in ligne_clean:
-            # Format: "lunar_python: 丁巳 己酉 癸未 壬戌"
-            parties = ligne_clean.split(":")
-            if len(parties) > 1:
-                piliers_str = parties[1].strip()
-                resultat["quatre_piliers"] = piliers_str
-                
-                # Séparer les 4 piliers
-                piliers = piliers_str.split()
-                if len(piliers) >= 4:
-                    # Chaque pilier = 2 caractères : Tronc + Branche
-                    noms = ["annee", "mois", "jour", "heure"]
-                    for i, nom in enumerate(noms):
-                        if i < len(piliers) and len(piliers[i]) >= 2:
-                            resultat["piliers"][nom]["tronc"] = piliers[i][0]
-                            resultat["piliers"][nom]["branche"] = piliers[i][1]
-    
-    # Garder le texte complet nettoyé
-    resultat["details_complet"] = texte.strip()
-    
-    return resultat
 
+    # --- FORCE ---
+    m = re.search(r'强弱:(\d+)\s+中值(\d+)', c)
+    if m:
+        result['force'] = int(m.group(1))
+        result['moyenne'] = int(m.group(2))
 
-# ===========================
-# ROUTES API
-# ===========================
+    # --- ORGANES ---
+    organes = {}
+    for cn, fr in {'胆':'vesicule','肝':'foie','小肠':'intestin_grele',
+                    '心':'coeur','胃':'estomac','脾':'rate',
+                    '大肠':'gros_intestin','肺':'poumon',
+                    '膀胱':'vessie','肾':'rein'}.items():
+        m2 = re.search(cn + r':\s*(\d+)', c)
+        if m2:
+            organes[fr] = int(m2.group(1))
+    if organes:
+        result['organes'] = organes
 
-@app.route('/api/bazi', methods=['POST'])
-def bazi_endpoint():
-    """
-    Endpoint principal appelé par WordPress.
-    
-    JSON attendu:
-    {
-        "annee": 1990,
-        "mois": 5,
-        "jour": 15,
-        "heure": 8,
-        "genre": "homme",          (optionnel, défaut: homme)
-        "calendrier": "gregorien"  (optionnel, défaut: gregorien)
-    }
-    """
+    # --- DA YUN (grandes fortunes) ---
+    dayun = []
+    for m2 in re.finditer(
+        r'^(\d+)\s{2,}([甲乙丙丁戊己庚辛壬癸][子丑寅卯辰巳午未申酉戌亥])\s+(\S+)\s+(\S+)',
+        c, re.MULTILINE):
+        gz = m2.group(2)
+        ti = TRONC_INFO.get(gz[0], {})
+        bi = BRANCHE_INFO.get(gz[1], {})
+        dayun.append({
+            'age': int(m2.group(1)), 'ganzhi': gz,
+            'tronc': gz[0], 'branche': gz[1],
+            'tronc_element': ti.get('element',''),
+            'branche_element': bi.get('element',''),
+            'animal': bi.get('animal',''),
+            'phase': m2.group(3), 'nayin': m2.group(4)
+        })
+    if dayun:
+        result['dayun'] = dayun
+
+    # --- DATES ---
+    m = re.search(r'公历:\s*(\d+)年(\d+)月(\d+)日', c)
+    if m:
+        result['date_solaire'] = f"{m.group(1)}-{m.group(2).zfill(2)}-{m.group(3).zfill(2)}"
+    m = re.search(r'农历:\s*(\d+)年(\d+)月(\d+)日', c)
+    if m:
+        result['date_lunaire'] = f"{m.group(1)}-{m.group(2)}-{m.group(3)}"
+
+    # --- PALAIS SPECIAUX ---
+    for pat, key in [('命宫:(\S+)','ming_gong'),
+                     ('胎元:(\S+)','tai_yuan'),
+                     ('身宫:(\S+)','shen_gong')]:
+        m = re.search(pat, c)
+        if m:
+            result[key] = m.group(1)
+
+    # --- TEXTES CLASSIQUES ---
+    for title, key in [('穷通宝鉴','qiong_tong'),
+                       ('三命通会','san_ming'),
+                       ('六十日用法口诀','liu_shi_ri')]:
+        idx = c.find(f'《{title}')
+        if idx >= 0:
+            start = c.find('\n', c.find('=', idx))
+            if start >= 0:
+                ends = []
+                for marker in ['\n\n\n《', '\n\n\n大运', '\n\n大运', '\n星宿']:
+                    pos = c.find(marker, start + 1)
+                    if pos > 0:
+                        ends.append(pos)
+                end = min(ends) if ends else len(c)
+                text = c[start:end].strip()
+                text = re.sub(r'=+', '', text).strip()
+                if text:
+                    result[key] = text
+
+    return result
+
+# ============================================================
+# ROUTES
+# ============================================================
+@app.route('/')
+def index():
+    return jsonify({
+        'message': '🏮 API BaZi active',
+        'usage': 'POST /bazi avec {year, month, day, hour, gender}'
+    })
+
+@app.route('/bazi', methods=['GET','POST'])
+def calculate_bazi():
     try:
-        data = request.get_json()
-        
-        if not data:
+        if request.method == 'POST':
+            data = request.get_json() or {}
+        else:
+            data = request.args
+
+        year = str(data.get('year', '1990'))
+        month = str(data.get('month', '5'))
+        day = str(data.get('day', '15'))
+        hour = str(data.get('hour', '8'))
+        gender = str(data.get('gender', 'M'))
+
+        cmd = [sys.executable, os.path.join(BASE_DIR, 'bazi.py'),
+               year, month, day, hour, '-g']
+        if gender == 'F':
+            cmd.append('-n')
+
+        proc = subprocess.run(cmd, capture_output=True, text=True,
+                            timeout=30, cwd=BASE_DIR)
+        output = proc.stdout
+
+        if not output.strip():
             return jsonify({
-                "success": False, 
-                "erreur": "Aucune donnée reçue"
-            }), 400
-        
-        # Paramètres obligatoires
-        annee = int(data.get('annee', 0))
-        mois  = int(data.get('mois', 0))
-        jour  = int(data.get('jour', 0))
-        heure = int(data.get('heure', 0))
-        
-        # Paramètres optionnels
-        genre      = data.get('genre', 'homme')       # homme ou femme
-        calendrier = data.get('calendrier', 'gregorien')  # gregorien ou lunaire
-        
-        # Validation
-        if not (1900 <= annee <= 2100):
-            return jsonify({
-                "success": False, 
-                "erreur": "Année doit être entre 1900 et 2100"
-            }), 400
-        if not (1 <= mois <= 12):
-            return jsonify({
-                "success": False, 
-                "erreur": "Mois doit être entre 1 et 12"
-            }), 400
-        if not (1 <= jour <= 31):
-            return jsonify({
-                "success": False, 
-                "erreur": "Jour doit être entre 1 et 31"
-            }), 400
-        if not (0 <= heure <= 23):
-            return jsonify({
-                "success": False, 
-                "erreur": "Heure doit être entre 0 et 23"
-            }), 400
-        
-        # Appeler le calcul BAZI
-        resultat = run_bazi(annee, mois, jour, heure, genre, calendrier)
-        
-        return jsonify(resultat)
-        
-    except ValueError as e:
-        return jsonify({
-            "success": False, 
-            "erreur": f"Valeur invalide: {str(e)}"
-        }), 400
+                'success': False,
+                'error': 'Pas de sortie du calcul',
+                'stderr': proc.stderr
+            }), 500
+
+        parsed = parse_bazi_output(output)
+        parsed['success'] = True
+        parsed['sortie_brute'] = output
+
+        return jsonify(parsed)
+
     except Exception as e:
+        import traceback
         return jsonify({
-            "success": False, 
-            "erreur": f"Erreur serveur: {str(e)}"
+            'success': False,
+            'error': str(e),
+            'trace': traceback.format_exc()
         }), 500
 
-
-@app.route('/api/test', methods=['GET'])
-def test():
-    """Route de test pour vérifier que l'API fonctionne."""
-    return jsonify({
-        "status": "✅ API BAZI opérationnelle",
-        "source": "github.com/bengoug/bazi",
-        "endpoints": {
-            "POST /api/bazi": "Calculer un thème BAZI",
-            "GET /api/test": "Tester l'API"
-        },
-        "exemple_requete": {
-            "annee": 1990,
-            "mois": 5,
-            "jour": 15,
-            "heure": 8,
-            "genre": "homme",
-            "calendrier": "gregorien"
-        }
-    })
-
-
-@app.route('/', methods=['GET'])
-def accueil():
-    """Page d'accueil."""
-    return jsonify({
-        "message": "🏮 Calculateur BAZI - API",
-        "documentation": "Envoyez un POST à /api/bazi",
-        "test": "Visitez /api/test"
-    })
-
-
-# ===========================
-# DÉMARRAGE
-# ===========================
+# ============================================================
+# START
+# ============================================================
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
-    app.run(host='0.0.0.0', port=port, debug=False)
+    app.run(host='0.0.0.0', port=port)
