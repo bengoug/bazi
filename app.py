@@ -55,11 +55,84 @@ SHISHEN_FR = {
     '--':'Maître du Jour'
 }
 
+# 12 phases (长生…)
+PHASE_FR = {
+    '长生': 'Longévité (naissance)', '沐浴': 'Bain (purification)', '冠带': 'Couronne (mise en forme)',
+    '临官': 'Prise de fonction', '帝旺': 'Apogée', '衰': 'Déclin', '病': 'Maladie',
+    '死': 'Fin / Mort', '墓': 'Tombe / Stockage', '绝': 'Extinction', '胎': 'Fœtus', '养': 'Gestation'
+}
+
+# 30 NaYin (纳音) uniques
+NAYIN_FR = {
+    '海中金': "Métal dans la mer",
+    '炉中火': "Feu du four",
+    '大林木': "Bois de grande forêt",
+    '路旁土': "Terre en bord de route",
+    '剑锋金': "Métal – lame d'épée",
+    '山头火': "Feu du sommet",
+    '涧下水': "Eau du ravin",
+    '城头土': "Terre des remparts",
+    '白蜡金': "Métal de cire blanche",
+    '杨柳木': "Bois de saule",
+    '泉中水': "Eau de la source",
+    '屋上土': "Terre sur le toit",
+    '霹雳火': "Feu du tonnerre",
+    '松柏木': "Bois de pin/cyprès",
+    '长流水': "Eau de long cours",
+    '沙中金': "Métal dans le sable",
+    '山下火': "Feu au pied de la montagne",
+    '平地木': "Bois de plaine",
+    '壁上土': "Terre sur le mur",
+    '金箔金': "Métal – feuille d'or",
+    '佛灯火': "Feu de la lampe du Bouddha",
+    '天河水': "Eau de la Voie lactée",
+    '大驿土': "Terre de la grande poste",
+    '钗钏金': "Métal des bijoux",
+    '桑柘木': "Bois de mûrier",
+    '大溪水': "Eau du grand ruisseau",
+    '沙中土': "Terre dans le sable",
+    '天上火': "Feu céleste",
+    '石榴木': "Bois de grenadier",
+    '大海水': "Eau de l'océan",
+}
+
+def _strip_ansi(s: str) -> str:
+    return re.sub(r'\x1b\[[0-9;]*m', '', s)
+
+def _ganzhi_details(gz: str):
+    """Return structured info for a ganzhi string like '甲子'."""
+    if not gz or len(gz) < 2:
+        return None
+    t, b = gz[0], gz[1]
+    ti = TRONC_INFO.get(t, {})
+    bi = BRANCHE_INFO.get(b, {})
+    return {
+        'ganzhi': gz,
+        'tronc': t,
+        'branche': b,
+        'tronc_pinyin': ti.get('pinyin', ''),
+        'branche_pinyin': bi.get('pinyin', ''),
+        'tronc_element': ti.get('element', ''),
+        'branche_element': bi.get('element', ''),
+        'animal': bi.get('animal', ''),
+    }
+
+def _safe_int(val, default, min_v=None, max_v=None):
+    try:
+        x = int(str(val).strip())
+        if min_v is not None and x < min_v:
+            return default
+        if max_v is not None and x > max_v:
+            return default
+        return x
+    except Exception:
+        return default
+
 # ============================================================
 # PARSING
 # ============================================================
-def parse_bazi_output(raw):
-    c = re.sub(r'\x1b\[[0-9;]*m', '', raw)
+def parse_bazi_output(raw, include_texts=False):
+    c = _strip_ansi(raw)
     result = {}
 
     # --- QUATRE PILIERS ---
@@ -70,17 +143,17 @@ def parse_bazi_output(raw):
         names = ['annee','mois','jour','heure']
         result['piliers'] = {}
         for i, name in enumerate(names):
-            t, b = pillars[i][0], pillars[i][1]
-            ti = TRONC_INFO.get(t, {})
-            bi = BRANCHE_INFO.get(b, {})
+            gz = pillars[i]
+            det = _ganzhi_details(gz) or {'ganzhi': gz}
             result['piliers'][name] = {
-                'tronc': t, 'branche': b,
-                'binome': pillars[i],
-                'tronc_pinyin': ti.get('pinyin',''),
-                'branche_pinyin': bi.get('pinyin',''),
-                'tronc_element': ti.get('element',''),
-                'branche_element': bi.get('element',''),
-                'animal': bi.get('animal',''),
+                'tronc': det.get('tronc',''),
+                'branche': det.get('branche',''),
+                'binome': det.get('ganzhi', gz),
+                'tronc_pinyin': det.get('tronc_pinyin',''),
+                'branche_pinyin': det.get('branche_pinyin',''),
+                'tronc_element': det.get('tronc_element',''),
+                'branche_element': det.get('branche_element',''),
+                'animal': det.get('animal',''),
             }
 
     # --- DIX DIEUX (SHISHEN) ---
@@ -112,9 +185,9 @@ def parse_bazi_output(raw):
     # --- ORGANES ---
     organes = {}
     for cn, fr in {'胆':'vesicule','肝':'foie','小肠':'intestin_grele',
-                    '心':'coeur','胃':'estomac','脾':'rate',
-                    '大肠':'gros_intestin','肺':'poumon',
-                    '膀胱':'vessie','肾':'rein'}.items():
+                   '心':'coeur','胃':'estomac','脾':'rate',
+                   '大肠':'gros_intestin','肺':'poumon',
+                   '膀胱':'vessie','肾':'rein'}.items():
         m2 = re.search(cn + r':\s*(\d+)', c)
         if m2:
             organes[fr] = int(m2.group(1))
@@ -127,15 +200,21 @@ def parse_bazi_output(raw):
         r'^(\d+)\s{2,}([甲乙丙丁戊己庚辛壬癸][子丑寅卯辰巳午未申酉戌亥])\s+(\S+)\s+(\S+)',
         c, re.MULTILINE):
         gz = m2.group(2)
-        ti = TRONC_INFO.get(gz[0], {})
-        bi = BRANCHE_INFO.get(gz[1], {})
+        det = _ganzhi_details(gz) or {}
+        phase = m2.group(3)
+        nayin = m2.group(4)
         dayun.append({
-            'age': int(m2.group(1)), 'ganzhi': gz,
-            'tronc': gz[0], 'branche': gz[1],
-            'tronc_element': ti.get('element',''),
-            'branche_element': bi.get('element',''),
-            'animal': bi.get('animal',''),
-            'phase': m2.group(3), 'nayin': m2.group(4)
+            'age': int(m2.group(1)),
+            'ganzhi': gz,
+            'tronc': det.get('tronc',''),
+            'branche': det.get('branche',''),
+            'tronc_element': det.get('tronc_element',''),
+            'branche_element': det.get('branche_element',''),
+            'animal': det.get('animal',''),
+            'phase': phase,
+            'phase_fr': PHASE_FR.get(phase, phase),
+            'nayin': nayin,
+            'nayin_fr': NAYIN_FR.get(nayin, nayin),
         })
     if dayun:
         result['dayun'] = dayun
@@ -154,26 +233,29 @@ def parse_bazi_output(raw):
                      ('身宫:(\S+)','shen_gong')]:
         m = re.search(pat, c)
         if m:
-            result[key] = m.group(1)
+            gz = m.group(1)
+            result[key] = gz                       # compat (string)
+            result[key + '_details'] = _ganzhi_details(gz)  # version détaillée
 
-    # --- TEXTES CLASSIQUES ---
-    for title, key in [('穷通宝鉴','qiong_tong'),
-                       ('三命通会','san_ming'),
-                       ('六十日用法口诀','liu_shi_ri')]:
-        idx = c.find(f'《{title}')
-        if idx >= 0:
-            start = c.find('\n', c.find('=', idx))
-            if start >= 0:
-                ends = []
-                for marker in ['\n\n\n《', '\n\n\n大运', '\n\n大运', '\n星宿']:
-                    pos = c.find(marker, start + 1)
-                    if pos > 0:
-                        ends.append(pos)
-                end = min(ends) if ends else len(c)
-                text = c[start:end].strip()
-                text = re.sub(r'=+', '', text).strip()
-                if text:
-                    result[key] = text
+    # --- TEXTES CLASSIQUES (optionnel) ---
+    if include_texts:
+        for title, key in [('穷通宝鉴','qiong_tong'),
+                           ('三命通会','san_ming'),
+                           ('六十日用法口诀','liu_shi_ri')]:
+            idx = c.find(f'《{title}')
+            if idx >= 0:
+                start = c.find('\n', c.find('=', idx))
+                if start >= 0:
+                    ends = []
+                    for marker in ['\n\n\n《', '\n\n\n大运', '\n\n大运', '\n星宿']:
+                        pos = c.find(marker, start + 1)
+                        if pos > 0:
+                            ends.append(pos)
+                    end = min(ends) if ends else len(c)
+                    text = c[start:end].strip()
+                    text = re.sub(r'=+', '', text).strip()
+                    if text:
+                        result[key] = text
 
     return result
 
@@ -184,7 +266,7 @@ def parse_bazi_output(raw):
 def index():
     return jsonify({
         'message': '🏮 API BaZi active',
-        'usage': 'POST /bazi avec {year, month, day, hour, gender}'
+        'usage': 'POST /bazi avec {year, month, day, hour, gender} (option: ?debug=1&include_texts=1)'
     })
 
 @app.route('/bazi', methods=['GET','POST'])
@@ -195,21 +277,32 @@ def calculate_bazi():
         else:
             data = request.args
 
-        year = str(data.get('year', '1990'))
-        month = str(data.get('month', '5'))
-        day = str(data.get('day', '15'))
-        hour = str(data.get('hour', '8'))
-        gender = str(data.get('gender', 'M'))
+        # sécurise/normalise un minimum
+        year = _safe_int(data.get('year', 1990), 1990, 1800, 2200)
+        month = _safe_int(data.get('month', 5), 5, 1, 12)
+        day = _safe_int(data.get('day', 15), 15, 1, 31)
+        hour = _safe_int(data.get('hour', 8), 8, 0, 23)
+        gender = str(data.get('gender', 'M')).upper().strip()
+
+        debug = str(data.get('debug', '0')).strip() == '1'
+        include_texts = str(data.get('include_texts', '0')).strip() == '1'
 
         cmd = [sys.executable, os.path.join(BASE_DIR, 'bazi.py'),
-               year, month, day, hour, '-g']
+               str(year), str(month), str(day), str(hour), '-g']
         if gender == 'F':
             cmd.append('-n')
 
         proc = subprocess.run(cmd, capture_output=True, text=True,
-                            timeout=30, cwd=BASE_DIR)
-        output = proc.stdout
+                              timeout=30, cwd=BASE_DIR)
 
+        if proc.returncode != 0:
+            return jsonify({
+                'success': False,
+                'error': 'Erreur d’exécution bazi.py',
+                'stderr': proc.stderr
+            }), 500
+
+        output = proc.stdout or ""
         if not output.strip():
             return jsonify({
                 'success': False,
@@ -217,9 +310,12 @@ def calculate_bazi():
                 'stderr': proc.stderr
             }), 500
 
-        parsed = parse_bazi_output(output)
+        parsed = parse_bazi_output(output, include_texts=include_texts)
         parsed['success'] = True
-        parsed['sortie_brute'] = output
+
+        # IMPORTANT: évite d’envoyer du chinois brut au front, sauf debug
+        if debug:
+            parsed['sortie_brute'] = output
 
         return jsonify(parsed)
 
@@ -231,9 +327,6 @@ def calculate_bazi():
             'trace': traceback.format_exc()
         }), 500
 
-# ============================================================
-# START
-# ============================================================
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port)
