@@ -1,239 +1,482 @@
-import os
-import sys
-import re
-import subprocess
-from flask import Flask, request, jsonify
-from flask_cors import CORS
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🏮 Calculateur BAZI</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
 
-app = Flask(__name__)
-CORS(app, resources={r"/*": {"origins": "*"}})
-
-@app.after_request
-def after_request(response):
-    response.headers.add('Access-Control-Allow-Origin', '*')
-    response.headers.add('Access-Control-Allow-Headers', 'Content-Type')
-    response.headers.add('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
-    return response
-
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-
-# ============================================================
-# MAPPINGS
-# ============================================================
-TRONC_INFO = {
-    '甲': {'pinyin':'Jiǎ','element':'Bois','pol':'+'},
-    '乙': {'pinyin':'Yǐ','element':'Bois','pol':'-'},
-    '丙': {'pinyin':'Bǐng','element':'Feu','pol':'+'},
-    '丁': {'pinyin':'Dīng','element':'Feu','pol':'-'},
-    '戊': {'pinyin':'Wù','element':'Terre','pol':'+'},
-    '己': {'pinyin':'Jǐ','element':'Terre','pol':'-'},
-    '庚': {'pinyin':'Gēng','element':'Métal','pol':'+'},
-    '辛': {'pinyin':'Xīn','element':'Métal','pol':'-'},
-    '壬': {'pinyin':'Rén','element':'Eau','pol':'+'},
-    '癸': {'pinyin':'Guǐ','element':'Eau','pol':'-'},
-}
-
-BRANCHE_INFO = {
-    '子': {'pinyin':'Zǐ','element':'Eau','animal':'Rat 🐀'},
-    '丑': {'pinyin':'Chǒu','element':'Terre','animal':'Buffle 🐂'},
-    '寅': {'pinyin':'Yín','element':'Bois','animal':'Tigre 🐅'},
-    '卯': {'pinyin':'Mǎo','element':'Bois','animal':'Lapin 🐇'},
-    '辰': {'pinyin':'Chén','element':'Terre','animal':'Dragon 🐉'},
-    '巳': {'pinyin':'Sì','element':'Feu','animal':'Serpent 🐍'},
-    '午': {'pinyin':'Wǔ','element':'Feu','animal':'Cheval 🐴'},
-    '未': {'pinyin':'Wèi','element':'Terre','animal':'Chèvre 🐐'},
-    '申': {'pinyin':'Shēn','element':'Métal','animal':'Singe 🐒'},
-    '酉': {'pinyin':'Yǒu','element':'Métal','animal':'Coq 🐓'},
-    '戌': {'pinyin':'Xū','element':'Terre','animal':'Chien 🐕'},
-    '亥': {'pinyin':'Hài','element':'Eau','animal':'Cochon 🐖'},
-}
-
-SHISHEN_FR = {
-    '比':'Parallèle','劫':'Rob. Richesse','食':'Dieu Gourmand',
-    '伤':'Off. Blessant','才':'Ric. Partielle','财':'Ric. Directe',
-    '杀':'7e Tueur','官':'Off. Direct','枭':'Sceau Partiel','印':'Sceau Direct',
-    '--':'Maître du Jour'
-}
-
-# ============================================================
-# PARSING
-# ============================================================
-def parse_bazi_output(raw):
-    c = re.sub(r'\x1b\[[0-9;]*m', '', raw)
-    result = {}
-
-    # --- QUATRE PILIERS ---
-    m = re.search(r'四柱：(\S{2})\s+(\S{2})\s+(\S{2})\s+(\S{2})', c)
-    if m:
-        pillars = [m.group(1), m.group(2), m.group(3), m.group(4)]
-        result['quatre_piliers'] = ' '.join(pillars)
-        names = ['annee','mois','jour','heure']
-        result['piliers'] = {}
-        for i, name in enumerate(names):
-            t, b = pillars[i][0], pillars[i][1]
-            ti = TRONC_INFO.get(t, {})
-            bi = BRANCHE_INFO.get(b, {})
-            result['piliers'][name] = {
-                'tronc': t, 'branche': b,
-                'binome': pillars[i],
-                'tronc_pinyin': ti.get('pinyin',''),
-                'branche_pinyin': bi.get('pinyin',''),
-                'tronc_element': ti.get('element',''),
-                'branche_element': bi.get('element',''),
-                'animal': bi.get('animal',''),
-            }
-
-    # --- DIX DIEUX (SHISHEN) ---
-    m = re.search(
-        r'([甲乙丙丁戊己庚辛壬癸])\s+([甲乙丙丁戊己庚辛壬癸])\s+([甲乙丙丁戊己庚辛壬癸])\s+([甲乙丙丁戊己庚辛壬癸])\s+'
-        r'(比|劫|食|伤|才|财|杀|官|枭|印|--)\s+(比|劫|食|伤|才|财|杀|官|枭|印|--)\s+(比|劫|食|伤|才|财|杀|官|枭|印|--)\s+(比|劫|食|伤|才|财|杀|官|枭|印|--)',
-        c)
-    if m and 'piliers' in result:
-        gods = [m.group(5), m.group(6), m.group(7), m.group(8)]
-        for i, name in enumerate(['annee','mois','jour','heure']):
-            result['piliers'][name]['shishen'] = gods[i]
-            result['piliers'][name]['shishen_fr'] = SHISHEN_FR.get(gods[i], gods[i])
-
-    # --- CINQ ELEMENTS ---
-    m = re.search(r'金(\d+)\s+木(\d+)\s+水(\d+)\s+火(\d+)\s+土(\d+)', c)
-    if m:
-        result['wuxing'] = {
-            'metal': int(m.group(1)), 'bois': int(m.group(2)),
-            'eau': int(m.group(3)), 'feu': int(m.group(4)),
-            'terre': int(m.group(5))
+        body {
+            font-family: 'Georgia', serif;
+            background: linear-gradient(135deg, #1a0a0a 0%, #2d1f1f 50%, #1a0a0a 100%);
+            color: #f0e6d3;
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: flex-start;
+            padding: 20px;
         }
 
-    # --- FORCE ---
-    m = re.search(r'强弱:(\d+)\s+中值(\d+)', c)
-    if m:
-        result['force'] = int(m.group(1))
-        result['moyenne'] = int(m.group(2))
+        .container {
+            background: rgba(45, 20, 20, 0.9);
+            border: 2px solid #c4a44a;
+            border-radius: 15px;
+            padding: 40px;
+            max-width: 750px;
+            width: 100%;
+            box-shadow: 0 0 30px rgba(196, 164, 74, 0.3);
+        }
 
-    # --- ORGANES ---
-    organes = {}
-    for cn, fr in {'胆':'vesicule','肝':'foie','小肠':'intestin_grele',
-                    '心':'coeur','胃':'estomac','脾':'rate',
-                    '大肠':'gros_intestin','肺':'poumon',
-                    '膀胱':'vessie','肾':'rein'}.items():
-        m2 = re.search(cn + r':\s*(\d+)', c)
-        if m2:
-            organes[fr] = int(m2.group(1))
-    if organes:
-        result['organes'] = organes
+        h1 { text-align: center; color: #c4a44a; font-size: 2em; margin-bottom: 10px; }
+        .subtitle { text-align: center; color: #a89070; margin-bottom: 30px; font-style: italic; }
+        .form-group { margin-bottom: 20px; }
 
-    # --- DA YUN (grandes fortunes) ---
-    dayun = []
-    for m2 in re.finditer(
-        r'^(\d+)\s{2,}([甲乙丙丁戊己庚辛壬癸][子丑寅卯辰巳午未申酉戌亥])\s+(\S+)\s+(\S+)',
-        c, re.MULTILINE):
-        gz = m2.group(2)
-        ti = TRONC_INFO.get(gz[0], {})
-        bi = BRANCHE_INFO.get(gz[1], {})
-        dayun.append({
-            'age': int(m2.group(1)), 'ganzhi': gz,
-            'tronc': gz[0], 'branche': gz[1],
-            'tronc_element': ti.get('element',''),
-            'branche_element': bi.get('element',''),
-            'animal': bi.get('animal',''),
-            'phase': m2.group(3), 'nayin': m2.group(4)
-        })
-    if dayun:
-        result['dayun'] = dayun
+        label { display: block; color: #c4a44a; margin-bottom: 5px; font-weight: bold; }
 
-    # --- DATES ---
-    m = re.search(r'公历:\s*(\d+)年(\d+)月(\d+)日', c)
-    if m:
-        result['date_solaire'] = f"{m.group(1)}-{m.group(2).zfill(2)}-{m.group(3).zfill(2)}"
-    m = re.search(r'农历:\s*(\d+)年(\d+)月(\d+)日', c)
-    if m:
-        result['date_lunaire'] = f"{m.group(1)}-{m.group(2)}-{m.group(3)}"
+        input, select {
+            width: 100%;
+            padding: 12px;
+            border: 1px solid #c4a44a;
+            border-radius: 8px;
+            background: rgba(26, 10, 10, 0.8);
+            color: #f0e6d3;
+            font-size: 16px;
+        }
 
-    # --- PALAIS SPECIAUX ---
-    for pat, key in [('命宫:(\S+)','ming_gong'),
-                     ('胎元:(\S+)','tai_yuan'),
-                     ('身宫:(\S+)','shen_gong')]:
-        m = re.search(pat, c)
-        if m:
-            result[key] = m.group(1)
+        input:focus, select:focus {
+            outline: none;
+            border-color: #ffd700;
+            box-shadow: 0 0 10px rgba(255, 215, 0, 0.3);
+        }
 
-    # --- TEXTES CLASSIQUES ---
-    for title, key in [('穷通宝鉴','qiong_tong'),
-                       ('三命通会','san_ming'),
-                       ('六十日用法口诀','liu_shi_ri')]:
-        idx = c.find(f'《{title}')
-        if idx >= 0:
-            start = c.find('\n', c.find('=', idx))
-            if start >= 0:
-                ends = []
-                for marker in ['\n\n\n《', '\n\n\n大运', '\n\n大运', '\n星宿']:
-                    pos = c.find(marker, start + 1)
-                    if pos > 0:
-                        ends.append(pos)
-                end = min(ends) if ends else len(c)
-                text = c[start:end].strip()
-                text = re.sub(r'=+', '', text).strip()
-                if text:
-                    result[key] = text
+        .row { display: flex; gap: 15px; }
+        .row .form-group { flex: 1; }
 
-    return result
+        button {
+            width: 100%;
+            padding: 15px;
+            background: linear-gradient(135deg, #c4a44a, #8b6914);
+            color: #1a0a0a;
+            border: none;
+            border-radius: 8px;
+            font-size: 18px;
+            font-weight: bold;
+            cursor: pointer;
+            margin-top: 10px;
+            transition: all 0.3s;
+        }
 
-# ============================================================
-# ROUTES
-# ============================================================
-@app.route('/')
-def index():
-    return jsonify({
-        'message': '🏮 API BaZi active',
-        'usage': 'POST /bazi avec {year, month, day, hour, gender}'
-    })
+        button:hover { background: linear-gradient(135deg, #ffd700, #c4a44a); transform: translateY(-2px); }
+        button:disabled { opacity: 0.6; cursor: not-allowed; transform: none; }
 
-@app.route('/bazi', methods=['GET','POST'])
-def calculate_bazi():
-    try:
-        if request.method == 'POST':
-            data = request.get_json() or {}
-        else:
-            data = request.args
+        .loading { text-align: center; color: #c4a44a; font-size: 1.2em; margin-top: 20px; display: none; }
 
-        year = str(data.get('year', '1990'))
-        month = str(data.get('month', '5'))
-        day = str(data.get('day', '15'))
-        hour = str(data.get('hour', '8'))
-        gender = str(data.get('gender', 'M'))
+        .error {
+            background: rgba(180, 0, 0, 0.3);
+            border: 1px solid #ff4444;
+            border-radius: 8px;
+            padding: 15px;
+            margin-top: 15px;
+            color: #ff9999;
+            display: none;
+        }
 
-        cmd = [sys.executable, os.path.join(BASE_DIR, 'bazi.py'),
-               year, month, day, hour, '-g']
-        if gender == 'F':
-            cmd.append('-n')
+        .resultat { margin-top: 30px; display: none; }
 
-        proc = subprocess.run(cmd, capture_output=True, text=True,
-                            timeout=30, cwd=BASE_DIR)
-        output = proc.stdout
+        .section-title {
+            color: #c4a44a;
+            font-size: 1.1em;
+            margin: 20px 0 10px 0;
+            border-bottom: 1px solid #c4a44a44;
+            padding-bottom: 5px;
+        }
 
-        if not output.strip():
-            return jsonify({
-                'success': False,
-                'error': 'Pas de sortie du calcul',
-                'stderr': proc.stderr
-            }), 500
+        /* PILIERS */
+        .piliers-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 10px;
+            margin-bottom: 20px;
+        }
 
-        parsed = parse_bazi_output(output)
-        parsed['success'] = True
-        parsed['sortie_brute'] = output
+        .pilier-item {
+            background: rgba(196, 164, 74, 0.1);
+            border: 1px solid #c4a44a;
+            border-radius: 10px;
+            padding: 15px 10px;
+            text-align: center;
+        }
 
-        return jsonify(parsed)
+        .pilier-item.jour-pilier {
+            border-color: #ffd700;
+            background: rgba(255, 215, 0, 0.15);
+        }
 
-    except Exception as e:
-        import traceback
-        return jsonify({
-            'success': False,
-            'error': str(e),
-            'trace': traceback.format_exc()
-        }), 500
+        .pilier-titre { font-size: 0.75em; color: #a89070; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 1px; }
+        .pilier-tronc { font-size: 2.2em; color: #ffd700; margin-bottom: 2px; }
+        .pilier-branche { font-size: 2.2em; color: #c4a44a; margin-bottom: 8px; }
+        .pilier-element-tronc { font-size: 0.75em; color: #a89070; margin-bottom: 2px; }
+        .pilier-element-branche { font-size: 0.75em; color: #a89070; margin-bottom: 2px; }
+        .pilier-animal { font-size: 0.8em; color: #c4a44a; margin-bottom: 4px; }
+        .pilier-shishen {
+            font-size: 0.7em;
+            background: rgba(196, 164, 74, 0.2);
+            border-radius: 4px;
+            padding: 2px 6px;
+            color: #ffd700;
+            margin-top: 4px;
+            display: inline-block;
+        }
 
-# ============================================================
-# START
-# ============================================================
-if __name__ == '__main__':
-    port = int(os.environ.get('PORT', 5000))
-    app.run(host='0.0.0.0', port=port)
+        /* WUXING */
+        .wuxing-grid {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+            margin-bottom: 10px;
+        }
+
+        .wuxing-item {
+            flex: 1;
+            min-width: 80px;
+            background: rgba(196, 164, 74, 0.1);
+            border: 1px solid #c4a44a55;
+            border-radius: 8px;
+            padding: 10px;
+            text-align: center;
+        }
+
+        .wuxing-nom { font-size: 0.8em; color: #c4a44a; margin-bottom: 4px; }
+        .wuxing-val { font-size: 1.4em; color: #ffd700; font-weight: bold; }
+
+        .wuxing-barre-fond {
+            background: rgba(255,255,255,0.1);
+            border-radius: 4px;
+            height: 6px;
+            margin-top: 6px;
+            overflow: hidden;
+        }
+
+        .wuxing-barre {
+            height: 100%;
+            border-radius: 4px;
+            transition: width 0.5s;
+        }
+
+        /* DAYUN */
+        .dayun-list {
+            display: flex;
+            gap: 8px;
+            overflow-x: auto;
+            padding-bottom: 10px;
+        }
+
+        .dayun-item {
+            background: rgba(196, 164, 74, 0.1);
+            border: 1px solid #c4a44a55;
+            border-radius: 8px;
+            padding: 10px;
+            text-align: center;
+            min-width: 75px;
+            flex-shrink: 0;
+            cursor: default;
+            transition: all 0.2s;
+        }
+
+        .dayun-item:hover {
+            background: rgba(196, 164, 74, 0.25);
+            border-color: #c4a44a;
+        }
+
+        .dayun-age { font-size: 0.7em; color: #a89070; margin-bottom: 4px; }
+        .dayun-gz { font-size: 1.3em; color: #ffd700; margin-bottom: 4px; }
+        .dayun-el { font-size: 0.65em; color: #a89070; line-height: 1.4; }
+
+        /* TEXTES */
+        .texte-classique {
+            background: rgba(0,0,0,0.3);
+            border-left: 3px solid #c4a44a;
+            padding: 15px;
+            border-radius: 0 8px 8px 0;
+            font-size: 0.85em;
+            color: #d4c4a4;
+            line-height: 1.7;
+            white-space: pre-wrap;
+            margin-bottom: 10px;
+        }
+
+        /* INFO BOXES */
+        .info-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 10px;
+            margin-bottom: 15px;
+        }
+
+        .info-box {
+            background: rgba(196, 164, 74, 0.1);
+            border: 1px solid #c4a44a55;
+            border-radius: 8px;
+            padding: 10px;
+            text-align: center;
+        }
+
+        .info-box-titre { font-size: 0.7em; color: #a89070; margin-bottom: 4px; }
+        .info-box-val { font-size: 1em; color: #ffd700; }
+
+        pre {
+            background: rgba(0,0,0,0.3);
+            padding: 15px;
+            border-radius: 8px;
+            font-size: 0.75em;
+            overflow-x: auto;
+            white-space: pre-wrap;
+            color: #a89070;
+        }
+
+        details summary {
+            cursor: pointer;
+            color: #c4a44a;
+            padding: 8px 0;
+            user-select: none;
+        }
+
+        details summary:hover { color: #ffd700; }
+    </style>
+</head>
+<body>
+<div class="container">
+    <h1>🏮 Calculateur BaZi</h1>
+    <p class="subtitle">八字命理 · Analyse des Huit Caractères</p>
+
+    <form id="baziForm">
+        <div class="row">
+            <div class="form-group">
+                <label>📅 Année</label>
+                <input type="number" id="annee" value="1990" min="1900" max="2100">
+            </div>
+            <div class="form-group">
+                <label>📅 Mois</label>
+                <input type="number" id="mois" value="5" min="1" max="12">
+            </div>
+        </div>
+
+        <div class="row">
+            <div class="form-group">
+                <label>📅 Jour</label>
+                <input type="number" id="jour" value="15" min="1" max="31">
+            </div>
+            <div class="form-group">
+                <label>⏰ Heure</label>
+                <input type="number" id="heure" value="8" min="0" max="23">
+            </div>
+        </div>
+
+        <div class="form-group">
+            <label>⚧ Genre</label>
+            <select id="genre">
+                <option value="M">👨 Masculin</option>
+                <option value="F">👩 Féminin</option>
+            </select>
+        </div>
+
+        <button type="submit" id="btn">🔮 Calculer mon BaZi</button>
+    </form>
+
+    <div class="loading" id="loading">⏳ Calcul en cours...</div>
+    <div class="error" id="erreur"></div>
+    <div class="resultat" id="resultat"></div>
+</div>
+
+<script>
+    const API_URL = "https://bazi-production-99fb.up.railway.app/bazi";
+
+    const COULEURS_ELEMENT = {
+        'Métal': '#c0c0c0',
+        'Bois':  '#4caf50',
+        'Eau':   '#2196f3',
+        'Feu':   '#f44336',
+        'Terre': '#ff9800'
+    };
+
+    document.getElementById('baziForm').addEventListener('submit', async function(e) {
+        e.preventDefault();
+
+        const btn     = document.getElementById('btn');
+        const loading = document.getElementById('loading');
+        const erreur  = document.getElementById('erreur');
+        const resultat = document.getElementById('resultat');
+
+        btn.disabled = true;
+        loading.style.display = 'block';
+        erreur.style.display  = 'none';
+        resultat.style.display = 'none';
+
+        const data = {
+            year:   parseInt(document.getElementById('annee').value),
+            month:  parseInt(document.getElementById('mois').value),
+            day:    parseInt(document.getElementById('jour').value),
+            hour:   parseInt(document.getElementById('heure').value),
+            gender: document.getElementById('genre').value
+        };
+
+        try {
+            const response = await fetch(API_URL, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(data)
+            });
+
+            const result = await response.json();
+
+            if (result.success) {
+                afficherResultat(result);
+            } else {
+                erreur.textContent = "❌ Erreur : " + (result.error || "Calcul impossible");
+                erreur.style.display = 'block';
+            }
+
+        } catch (err) {
+            erreur.textContent = "❌ Impossible de contacter l'API : " + err.message;
+            erreur.style.display = 'block';
+        }
+
+        loading.style.display = 'none';
+        btn.disabled = false;
+    });
+
+    function afficherResultat(data) {
+        let html = '';
+
+        // ========== QUATRE PILIERS ==========
+        html += `<div class="section-title">🏮 Les Quatre Piliers</div>`;
+        html += `<div class="piliers-grid">`;
+
+        const noms = ['Année', 'Mois', 'Jour', 'Heure'];
+        const cles = ['annee', 'mois', 'jour', 'heure'];
+
+        if (data.piliers) {
+            cles.forEach((cle, i) => {
+                const p = data.piliers[cle];
+                if (!p) return;
+
+                const couleurTronc = COULEURS_ELEMENT[p.tronc_element] || '#c4a44a';
+                const couleurBranche = COULEURS_ELEMENT[p.branche_element] || '#c4a44a';
+                const estJour = cle === 'jour';
+
+                html += `
+                <div class="pilier-item ${estJour ? 'jour-pilier' : ''}">
+                    <div class="pilier-titre">${noms[i]}${estJour ? ' ★' : ''}</div>
+                    <div class="pilier-tronc" style="color:${couleurTronc}">${p.tronc || '?'}</div>
+                    <div class="pilier-branche" style="color:${couleurBranche}">${p.branche || '?'}</div>
+                    <div class="pilier-element-tronc" style="color:${couleurTronc}">⬡ ${p.tronc_element || ''}</div>
+                    <div class="pilier-element-branche" style="color:${couleurBranche}">⬡ ${p.branche_element || ''}</div>
+                    <div class="pilier-animal">${p.animal || ''}</div>
+                    ${p.shishen_fr ? `<span class="pilier-shishen">${p.shishen_fr}</span>` : ''}
+                </div>`;
+            });
+        }
+        html += `</div>`;
+
+        // ========== INFOS GENERALES ==========
+        if (data.date_solaire || data.ming_gong || data.force !== undefined) {
+            html += `<div class="info-grid">`;
+            if (data.date_solaire) html += `<div class="info-box"><div class="info-box-titre">📅 Date solaire</div><div class="info-box-val">${data.date_solaire}</div></div>`;
+            if (data.ming_gong)    html += `<div class="info-box"><div class="info-box-titre">🏠 Palais du Destin</div><div class="info-box-val">${data.ming_gong}</div></div>`;
+            if (data.force !== undefined) html += `<div class="info-box"><div class="info-box-titre">💪 Force du Jour</div><div class="info-box-val">${data.force} / ${data.moyenne} moy.</div></div>`;
+            if (data.tai_yuan)     html += `<div class="info-box"><div class="info-box-titre">🌱 Taiyuan</div><div class="info-box-val">${data.tai_yuan}</div></div>`;
+            if (data.shen_gong)    html += `<div class="info-box"><div class="info-box-titre">🎯 Palais du Corps</div><div class="info-box-val">${data.shen_gong}</div></div>`;
+            if (data.date_lunaire) html += `<div class="info-box"><div class="info-box-titre">🌙 Date lunaire</div><div class="info-box-val">${data.date_lunaire}</div></div>`;
+            html += `</div>`;
+        }
+
+        // ========== CINQ ELEMENTS ==========
+        if (data.wuxing) {
+            const wx = data.wuxing;
+            const total = wx.metal + wx.bois + wx.eau + wx.feu + wx.terre || 1;
+            const elements = [
+                { nom: '⚙️ Métal', val: wx.metal, el: 'Métal' },
+                { nom: '🌿 Bois',  val: wx.bois,  el: 'Bois'  },
+                { nom: '💧 Eau',   val: wx.eau,   el: 'Eau'   },
+                { nom: '🔥 Feu',   val: wx.feu,   el: 'Feu'   },
+                { nom: '🪨 Terre', val: wx.terre, el: 'Terre' }
+            ];
+
+            html += `<div class="section-title">🔯 Cinq Éléments (Wu Xing)</div>`;
+            html += `<div class="wuxing-grid">`;
+            elements.forEach(e => {
+                const pct = Math.round((e.val / total) * 100);
+                const couleur = COULEURS_ELEMENT[e.el] || '#c4a44a';
+                html += `
+                <div class="wuxing-item">
+                    <div class="wuxing-nom">${e.nom}</div>
+                    <div class="wuxing-val" style="color:${couleur}">${e.val}</div>
+                    <div class="wuxing-barre-fond">
+                        <div class="wuxing-barre" style="width:${pct}%; background:${couleur}"></div>
+                    </div>
+                </div>`;
+            });
+            html += `</div>`;
+        }
+
+        // ========== GRANDES FORTUNES ==========
+        if (data.dayun && data.dayun.length > 0) {
+            // Dédoublonner par age+ganzhi
+            const unique = [];
+            const vus = new Set();
+            data.dayun.forEach(d => {
+                const cle = `${d.age}-${d.ganzhi}`;
+                if (!vus.has(cle)) { vus.add(cle); unique.push(d); }
+            });
+
+            html += `<div class="section-title">🌊 Grandes Fortunes (Da Yun)</div>`;
+            html += `<div class="dayun-list">`;
+            unique.slice(0, 9).forEach(d => {
+                const couleur = COULEURS_ELEMENT[d.tronc_element] || '#ffd700';
+                html += `
+                <div class="dayun-item">
+                    <div class="dayun-age">${d.age} ans</div>
+                    <div class="dayun-gz" style="color:${couleur}">${d.ganzhi}</div>
+                    <div class="dayun-el">${d.tronc_element || ''}</div>
+                    <div class="dayun-el">${d.animal || ''}</div>
+                </div>`;
+            });
+            html += `</div>`;
+        }
+
+        // ========== TEXTES CLASSIQUES ==========
+        const textes = [
+            { cle: 'liu_shi_ri', titre: '📜 Six Dix Jours (口诀)' },
+            { cle: 'qiong_tong', titre: '📖 Qiong Tong Bao Jian (穷通宝鉴)' },
+            { cle: 'san_ming',   titre: '📚 San Ming Tong Hui (三命通会)' }
+        ];
+
+        textes.forEach(t => {
+            if (data[t.cle]) {
+                html += `
+                <details style="margin-top:15px;">
+                    <summary class="section-title" style="list-style:none; cursor:pointer;">
+                        ${t.titre} ▼
+                    </summary>
+                    <div class="texte-classique">${data[t.cle]}</div>
+                </details>`;
+            }
+        });
+
+        // ========== DONNEES BRUTES ==========
+        html += `
+        <details style="margin-top:15px;">
+            <summary style="cursor:pointer; color:#c4a44a; padding:8px 0;">
+                📋 Voir toutes les données JSON ▼
+            </summary>
+            <pre>${JSON.stringify(data, null, 2)}</pre>
+        </details>`;
+
+        const resultat = document.getElementById('resultat');
+        resultat.innerHTML = html;
+        resultat.style.display = 'block';
+    }
+</script>
+</body>
+</html>
