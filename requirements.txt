@@ -1,0 +1,6 @@
+flask
+flask-cors
+gunicorn
+bidict
+lunar_python
+colorama
